@@ -134,7 +134,10 @@ are picked up from the installed conf the next time the overlay starts.
 - Every 5 minutes launchd runs `lib/nag.js`. Outside the window, or when off or
   paused, it exits silently after about 0.06 s. Inside, it opens a borderless
   dark window on every screen at the shielding level (above the menu bar and
-  Dock) on all Spaces, and takes keyboard focus so typing is swallowed.
+  Dock) on all Spaces, and takes keyboard focus so typing is swallowed. It
+  also asks macOS to disable app switching (Cmd-Tab) and to hide the Dock
+  while it is up, so you can't switch to an app hidden underneath and type
+  blind. Nothing beyond that: Force Quit is deliberately left alone.
 - Clicking Snooze quits the process. launchd waits one full interval **after
   the job exits** before starting it again, so the snooze is always 5 minutes,
   however long the overlay was open. launchd never runs two copies at once.
