@@ -182,9 +182,11 @@ pkill -f lib/nag.js                                 # get rid of an overlay from
 ## Layout
 
 ```
-bin/bedtime-nag                    the CLI (bash 3.2)
-lib/nag.js                         the overlay (JXA)
-share/bedtime-nag.conf             constants shared by both
-share/local.bedtime-nag.plist.template
-Makefile                           make install / make uninstall
+bin/bedtime-nag                         the CLI (bash 3.2)
+lib/nag.js                              the overlay (JXA)
+share/bedtime-nag.conf                  constants and overlay text, read by both
+share/local.bedtime-nag.plist.template  LaunchAgent plist, filled in by install
+Makefile                                make install / make uninstall
+README.md                               this file
+LICENSE                                 license text
 ```
