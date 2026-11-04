@@ -134,10 +134,8 @@ are picked up from the installed conf the next time the overlay starts.
 - Every 5 minutes launchd runs `lib/nag.js`. Outside the window, or when off or
   paused, it exits silently after about 0.06 s. Inside, it opens a borderless
   dark window on every screen at the shielding level (above the menu bar and
-  Dock) on all Spaces, and takes keyboard focus so typing is swallowed. It
-  also asks macOS to disable app switching (Cmd-Tab) and to hide the Dock
-  while it is up, so you can't switch to an app hidden underneath and type
-  blind. Nothing beyond that: Force Quit is deliberately left alone.
+  Dock) on all Spaces, and takes keyboard focus so typing is swallowed (but
+  see [Known limitation](#known-limitation-cmd-tab)).
 - Clicking Snooze quits the process. launchd waits one full interval **after
   the job exits** before starting it again, so the snooze is always 5 minutes,
   however long the overlay was open. launchd never runs two copies at once.
@@ -150,6 +148,20 @@ are picked up from the installed conf the next time the overlay starts.
   local time, so it is right on the night the clocks change.
 - `now` is started by the CLI, not by launchd, so it can stack on top of an
   overlay launchd already opened.
+
+## Known limitation: Cmd-Tab
+
+The overlay covers every screen and takes keyboard focus, but it cannot stop
+you from switching apps: **Cmd-Tab still works.** Once you have switched, the
+overlay is no longer the active app, so what you type goes to the app hidden
+underneath. The overlay stays on top, though, so you type blind and can't see
+or click that app.
+
+I tried asking macOS to disable app switching while the overlay is up
+(`NSApplicationPresentationDisableProcessSwitching`). The system reported the
+option as in effect, but Cmd-Tab kept working (macOS 27.2), so it was removed
+again. Taking focus back whenever the overlay loses it would be the next thing
+to try.
 
 ## Getting out
 
