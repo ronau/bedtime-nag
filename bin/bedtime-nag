@@ -34,8 +34,19 @@ ROOT=$(dirname "$(dirname "$SELF")")
 CONF="$ROOT/share/bedtime-nag.conf"
 NAG_JS="$ROOT/lib/nag.js"
 
-# shellcheck source=share/bedtime-nag.conf
-. "$CONF" || { echo "bedtime-nag: cannot read $CONF" >&2; exit 1; }
+# Read the constants we use. The conf is parsed, never sourced: a value is
+# everything after the first '=', taken literally, so quotes, '$' or backticks
+# in the overlay texts can neither break nor run anything. (`|| [ -n "$key" ]`
+# keeps a last line that has no trailing newline.)
+[ -r "$CONF" ] || { echo "bedtime-nag: cannot read $CONF" >&2; exit 1; }
+while IFS='=' read -r key value || [ -n "$key" ]; do
+  case $key in
+    DEFAULT_START|DEFAULT_END|INTERVAL) printf -v "$key" '%s' "$value" ;;
+  esac
+done < "$CONF"
+for key in DEFAULT_START DEFAULT_END INTERVAL; do
+  [ -n "${!key:-}" ] || { echo "bedtime-nag: $key is missing in $CONF" >&2; exit 1; }
+done
 
 die() { echo "bedtime-nag: $*" >&2; exit 1; }
 
