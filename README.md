@@ -103,9 +103,21 @@ the commands above (`defaults read local.bedtime-nag` shows them):
 | `end` | "HH:MM" | set by `wake`, default 05:00 |
 
 Constants live in one file, [share/bedtime-nag.conf](share/bedtime-nag.conf):
-the default window, `INTERVAL` (300 s) and `UNLOCK_AFTER` (20 s). The button
-label is derived from `INTERVAL` ("Snooze 5 min"), so it can't drift from the
-real snooze length.
+the default window, `INTERVAL` (300 s), `UNLOCK_AFTER` (20 s) and the two
+lines of overlay text, `TITLE` ("Go to bed.") and `SUBTITLE`. The button label
+is derived from `INTERVAL` ("Snooze 5 min"), so it can't drift from the real
+snooze length.
+
+**Overlay text.** `TITLE` and `SUBTITLE` are plain text: one line each, UTF-8,
+and emoji work, in colour (tested with ZWJ sequences, flags and skin tones).
+Write the text as it should appear: everything after the first `=` is taken
+literally, so no quotes or escaping, and apostrophes, `$` and backticks are
+fine. Fonts and sizes are fixed (title 72 pt bold, subtitle 24 pt). Text is
+not wrapped: a line too wide for the screen starts at the left edge and is cut
+off on the right. On a 1440 pt wide screen that is roughly 40 characters for
+the title and 140 for the subtitle. To preview a change before installing, run
+`./bin/bedtime-nag now` from the checkout: it uses the checkout's conf, while
+`bedtime-nag now` from your `PATH` uses the installed one.
 
 The job reads the *installed* copy of that file, so edit the one in the repo
 and run `make install` to apply a change.
@@ -114,8 +126,8 @@ and run `make install` to apply a change.
 the interval from `StartInterval` in the rendered plist, and only `install`
 regenerates that. Skip it and the job keeps firing at the old rate while the
 button label (derived from the conf) already shows the new one.
-`UNLOCK_AFTER` and the default window need no reload: they are picked up from
-the installed conf the next time the overlay starts.
+`UNLOCK_AFTER`, the default window and the overlay text need no reload: they
+are picked up from the installed conf the next time the overlay starts.
 
 ## How it behaves
 

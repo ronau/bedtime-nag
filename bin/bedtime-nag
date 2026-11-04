@@ -40,6 +40,7 @@ NAG_JS="$ROOT/lib/nag.js"
 # keeps a last line that has no trailing newline.)
 [ -r "$CONF" ] || { echo "bedtime-nag: cannot read $CONF" >&2; exit 1; }
 while IFS='=' read -r key value || [ -n "$key" ]; do
+  value=${value%$'\r'}   # tolerate a CRLF conf
   case $key in
     DEFAULT_START|DEFAULT_END|INTERVAL) printf -v "$key" '%s' "$value" ;;
   esac
@@ -147,8 +148,9 @@ cmd_install() {
   if [ "$ROOT" != "$APP_DIR" ]; then
     mkdir -p "$APP_DIR/bin" "$APP_DIR/lib" "$APP_DIR/share"
     install -m 755 "$ROOT/bin/bedtime-nag" "$APP_DIR/bin/bedtime-nag"
-    install -m 644 "$ROOT/lib/nag.js" "$APP_DIR/lib/nag.js"
+    # conf before nag.js: a new nag.js may require keys an old conf lacks.
     install -m 644 "$ROOT/share/bedtime-nag.conf" "$APP_DIR/share/bedtime-nag.conf"
+    install -m 644 "$ROOT/lib/nag.js" "$APP_DIR/lib/nag.js"
     install -m 644 "$ROOT/share/local.bedtime-nag.plist.template" \
       "$APP_DIR/share/local.bedtime-nag.plist.template"
   fi
