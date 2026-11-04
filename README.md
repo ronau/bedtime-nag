@@ -105,8 +105,17 @@ the commands above (`defaults read local.bedtime-nag` shows them):
 Constants live in one file, [share/bedtime-nag.conf](share/bedtime-nag.conf):
 the default window, `INTERVAL` (300 s) and `UNLOCK_AFTER` (20 s). The button
 label is derived from `INTERVAL` ("Snooze 5 min"), so it can't drift from the
-real snooze length. After editing, run `bedtime-nag install` to apply (the
-interval is baked into the plist).
+real snooze length.
+
+The job reads the *installed* copy of that file, so edit the one in the repo
+and run `make install` to apply a change.
+
+**Changing `INTERVAL` always requires another `make install`.** launchd takes
+the interval from `StartInterval` in the rendered plist, and only `install`
+regenerates that. Skip it and the job keeps firing at the old rate while the
+button label (derived from the conf) already shows the new one.
+`UNLOCK_AFTER` and the default window need no reload: they are picked up from
+the installed conf the next time the overlay starts.
 
 ## How it behaves
 
