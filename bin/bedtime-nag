@@ -1,0 +1,243 @@
+#!/bin/bash
+# bedtime-nag: control the bedtime nag. Run `bedtime-nag help` for usage.
+#
+# Settings live in the defaults domain local.bedtime-nag:
+#   disabled (bool)   pauseUntil (epoch seconds)   start / end ("HH:MM")
+# Constants (default window, interval, unlock delay) are in share/bedtime-nag.conf.
+#
+# Written for the stock macOS bash 3.2: no associative arrays, no ${var,,}.
+
+# Shortcuts' "Run Shell Script" starts with a minimal PATH; don't depend on it.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+DOMAIN=local.bedtime-nag      # defaults domain, also the launchd label
+LABEL=local.bedtime-nag
+APP_DIR="$HOME/.local/share/bedtime-nag"
+BIN_LINK="$HOME/.local/bin/bedtime-nag"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+PREFS_FILE="$HOME/Library/Preferences/$DOMAIN.plist"
+
+# Resolve symlinks (no `readlink -f` in the bash-3.2-era toolbox) so that
+# ROOT is the real install or checkout directory, whichever way we were called.
+resolve() {
+  local p=$1 dir
+  while [ -L "$p" ]; do
+    dir=$(cd "$(dirname "$p")" && pwd -P)
+    p=$(readlink "$p")
+    case $p in /*) ;; *) p=$dir/$p ;; esac
+  done
+  dir=$(cd "$(dirname "$p")" && pwd -P)
+  printf '%s/%s\n' "$dir" "$(basename "$p")"
+}
+SELF=$(resolve "${BASH_SOURCE[0]}")
+ROOT=$(dirname "$(dirname "$SELF")")
+CONF="$ROOT/share/bedtime-nag.conf"
+NAG_JS="$ROOT/lib/nag.js"
+
+# shellcheck source=share/bedtime-nag.conf
+. "$CONF" || { echo "bedtime-nag: cannot read $CONF" >&2; exit 1; }
+
+die() { echo "bedtime-nag: $*" >&2; exit 1; }
+
+usage() {
+  cat <<EOF
+Usage: bedtime-nag <command>
+
+  status               show settings and whether the launchd job is loaded (default)
+  on                   enable (also clears any pause)
+  off                  disable until you run "on"
+  pause [minutes]      stop nagging for N minutes (default 60)
+  skip                 stop nagging until the next wake time (skip tonight)
+  resume               clear a pause or skip
+  bedtime HH:MM        set when nagging starts (24h clock)
+  wake HH:MM           set when nagging stops
+  now                  show the overlay right now, ignoring all settings
+  install              install / upgrade the LaunchAgent (idempotent)
+  uninstall [--keep-settings]
+                       remove everything; --keep-settings keeps the defaults domain
+EOF
+}
+
+get() { defaults read "$DOMAIN" "$1" 2>/dev/null; }
+
+# Validate HH:MM (24h) and print it zero-padded.
+norm() {
+  if [[ "$1" =~ ^([0-9]{1,2}):([0-9]{2})$ ]] \
+     && (( 10#${BASH_REMATCH[1]} < 24 && 10#${BASH_REMATCH[2]} < 60 )); then
+    printf '%02d:%02d' "$((10#${BASH_REMATCH[1]}))" "$((10#${BASH_REMATCH[2]}))"
+  else
+    return 1
+  fi
+}
+
+# Epoch of the next local HH:MM strictly after $2 (default: now).
+# Calendar arithmetic is left to date(1)/mktime in local time; adding 86400
+# would be an hour off on the day the clocks change.
+next_occurrence() {
+  local hh=$((10#${1%%:*})) mm=$((10#${1##*:})) ref=${2:-$(date +%s)} t
+  t=$(date -j -r "$ref" -v"${hh}"H -v"${mm}"M -v0S +%s) || return 1
+  if (( t <= ref )); then
+    t=$(date -j -r "$ref" -v+1d -v"${hh}"H -v"${mm}"M -v0S +%s) || return 1
+  fi
+  echo "$t"
+}
+
+job_loaded() { launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; }
+
+cmd_status() {
+  local start end now p
+  start=$(get start); start=${start:-$DEFAULT_START}
+  end=$(get end);     end=${end:-$DEFAULT_END}
+  now=$(date +%s)
+  if [ "$(get disabled)" = "1" ]; then echo "State:   disabled"; else echo "State:   enabled"; fi
+  echo "Window:  $start to $end"
+  p=$(get pauseUntil)
+  if [ -n "$p" ] && (( p > now )); then
+    echo "Paused:  until $(date -r "$p" '+%a %H:%M')"
+  fi
+  if job_loaded; then
+    echo "Job:     loaded"
+  else
+    echo "Job:     NOT loaded (run: bedtime-nag install)"
+  fi
+}
+
+cmd_now() {
+  [ -f "$NAG_JS" ] || die "missing $NAG_JS"
+  # Detach completely so a Shortcuts "Run Shell Script" action returns at once:
+  # the subshell + & reparents osascript, nohup shields it from SIGHUP, and no
+  # fd of ours (stdout/stderr pipes!) stays open in the child.
+  ( NAG_FORCE=1 nohup /usr/bin/osascript -l JavaScript "$NAG_JS" \
+      </dev/null >/dev/null 2>&1 & )
+  echo "Overlay shown."
+}
+
+# Render plist template $1 into file $2.
+render_plist() {
+  local tpl=$1 out=$2 body js
+  [ -f "$tpl" ] || die "missing $tpl"
+  js=$APP_DIR/lib/nag.js
+  # XML-escape the path (a `&` in $HOME would otherwise break the plist).
+  js=${js//&/&amp;}; js=${js//</&lt;}; js=${js//>/&gt;}
+  body=$(<"$tpl")
+  body=${body//__NAG_JS__/$js}
+  body=${body//__INTERVAL__/$INTERVAL}
+  printf '%s\n' "$body" > "$out"
+  plutil -lint "$out" >/dev/null || die "rendered plist is invalid: $out"
+}
+
+cmd_install() {
+  [ "$(uname)" = Darwin ] || die "macOS only"
+  local uid domain tmp i
+  uid=$(id -u); domain=gui/$uid
+
+  # 1. Copy the program files (skipped when running from the installed copy).
+  if [ "$ROOT" != "$APP_DIR" ]; then
+    mkdir -p "$APP_DIR/bin" "$APP_DIR/lib" "$APP_DIR/share"
+    install -m 755 "$ROOT/bin/bedtime-nag" "$APP_DIR/bin/bedtime-nag"
+    install -m 644 "$ROOT/lib/nag.js" "$APP_DIR/lib/nag.js"
+    install -m 644 "$ROOT/share/bedtime-nag.conf" "$APP_DIR/share/bedtime-nag.conf"
+    install -m 644 "$ROOT/share/local.bedtime-nag.plist.template" \
+      "$APP_DIR/share/local.bedtime-nag.plist.template"
+  fi
+
+  # 2. Symlink the CLI onto the PATH (never clobber somebody else's file).
+  mkdir -p "$(dirname "$BIN_LINK")"
+  if [ -e "$BIN_LINK" ] || [ -L "$BIN_LINK" ]; then
+    [ -L "$BIN_LINK" ] || die "$BIN_LINK exists and is not a symlink; not touching it"
+  fi
+  ln -sfn "$APP_DIR/bin/bedtime-nag" "$BIN_LINK"
+
+  # 3. Render the LaunchAgent plist from the *installed* copy of the template.
+  mkdir -p "$(dirname "$PLIST")"
+  tmp=$(mktemp "$PLIST.XXXXXX") || die "cannot write to $(dirname "$PLIST")"
+  render_plist "$APP_DIR/share/local.bedtime-nag.plist.template" "$tmp"
+  mv "$tmp" "$PLIST"
+
+  # 4. (Re)load. bootout can still be tearing the service down when bootstrap
+  #    runs, which fails with "Input/output error", so retry briefly.
+  if job_loaded; then launchctl bootout "$domain/$LABEL" 2>/dev/null; fi
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if launchctl bootstrap "$domain" "$PLIST" 2>/dev/null; then break; fi
+    [ "$i" = 10 ] && die "launchctl bootstrap failed (see: launchctl print $domain/$LABEL)"
+    sleep 1
+  done
+
+  echo "Installed: $APP_DIR"
+  echo "Command:   $BIN_LINK"
+  echo "Job:       $PLIST (every ${INTERVAL}s, runs once right now)"
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "Note: $HOME/.local/bin is not on your PATH." ;; esac
+}
+
+cmd_uninstall() {
+  local keep=0 uid arg
+  uid=$(id -u)
+  for arg in "$@"; do
+    case $arg in
+      --keep-settings) keep=1 ;;
+      *) die "uninstall: unknown option '$arg'" ;;
+    esac
+  done
+
+  if job_loaded; then launchctl bootout "gui/$uid/$LABEL" 2>/dev/null; fi
+  # An overlay started by `now` is not a launchd child; stop it too.
+  pkill -f "$APP_DIR/lib/nag.js" 2>/dev/null
+  rm -f "$PLIST"
+  # Only remove the symlink if it is ours.
+  if [ -L "$BIN_LINK" ] && [ "$(readlink "$BIN_LINK")" = "$APP_DIR/bin/bedtime-nag" ]; then
+    rm -f "$BIN_LINK"
+  fi
+  rmdir "$(dirname "$BIN_LINK")" 2>/dev/null   # only if empty
+  case $APP_DIR in */bedtime-nag) rm -rf "$APP_DIR" ;; esac
+  if [ "$keep" = 1 ]; then
+    echo "Uninstalled (settings kept in defaults domain $DOMAIN)."
+  else
+    # `defaults delete` leaves an empty plist behind, so remove the file too.
+    defaults delete "$DOMAIN" 2>/dev/null
+    rm -f "$PREFS_FILE"
+    echo "Uninstalled (settings deleted)."
+  fi
+}
+
+main() {
+  local now deadline mins t key
+  now=$(date +%s)
+  case "${1:-status}" in
+    status) cmd_status ;;
+    on)
+      defaults delete "$DOMAIN" disabled 2>/dev/null
+      defaults delete "$DOMAIN" pauseUntil 2>/dev/null
+      echo "Nag enabled." ;;
+    off)
+      defaults write "$DOMAIN" disabled -bool true
+      echo "Nag disabled (run 'bedtime-nag on' to re-enable)." ;;
+    pause)
+      mins=${2:-60}
+      [[ "$mins" =~ ^[0-9]{1,6}$ ]] && (( 10#$mins > 0 )) \
+        || die "usage: bedtime-nag pause [minutes]"
+      deadline=$((now + 10#$mins * 60))
+      defaults write "$DOMAIN" pauseUntil -int "$deadline"
+      echo "Paused for $((10#$mins)) min (until $(date -r "$deadline" '+%H:%M'))." ;;
+    skip)
+      key=$(get end); key=${key:-$DEFAULT_END}
+      t=$(next_occurrence "$key" "$now") || die "cannot compute next wake time"
+      defaults write "$DOMAIN" pauseUntil -int "$t"
+      echo "Paused until $(date -r "$t" '+%a %H:%M')." ;;
+    resume)
+      defaults delete "$DOMAIN" pauseUntil 2>/dev/null
+      echo "Pause cleared." ;;
+    bedtime|wake)
+      t=$(norm "${2:-}") || die "usage: bedtime-nag $1 HH:MM (24h clock)"
+      key=start; [ "$1" = wake ] && key=end
+      defaults write "$DOMAIN" "$key" -string "$t"
+      echo "$1 set to $t." ;;
+    now) cmd_now ;;
+    install) cmd_install ;;
+    uninstall) shift; cmd_uninstall "$@" ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; exit 1 ;;
+  esac
+}
+
+# Run unless sourced (so the helpers can be tested in isolation).
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
