@@ -74,7 +74,8 @@ norm() {
 # Calendar arithmetic is left to date(1)/mktime in local time; adding 86400
 # would be an hour off on the day the clocks change.
 next_occurrence() {
-  local hh=$((10#${1%%:*})) mm=$((10#${1##*:})) ref=${2:-$(date +%s)} t
+  local hh=$((10#${1%%:*})) mm=$((10#${1##*:})) ref=${2:-} t
+  [ -n "$ref" ] || ref=$(date +%s)
   t=$(date -j -r "$ref" -v"${hh}"H -v"${mm}"M -v0S +%s) || return 1
   if (( t <= ref )); then
     t=$(date -j -r "$ref" -v+1d -v"${hh}"H -v"${mm}"M -v0S +%s) || return 1
