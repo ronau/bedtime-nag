@@ -16,6 +16,8 @@ for half an hour.
 - **No sudo, no network, nothing outside your home directory.**
 - It is a nag, not a lock: see [Getting out](#getting-out).
 
+![The bedtime overlay on a MacBook screen: a near-black layer covers a browser window, whose page is only faintly visible through it. In the centre is a large white "Go to bed." headline, the subtitle "It is past your bedtime. Future you will thank you.", and a greyed-out "Snooze 5 min (17s)" button that is still counting down.](screenshot.jpg)
+
 ## Install / upgrade / uninstall
 
 ```sh
